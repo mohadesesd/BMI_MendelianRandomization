@@ -19,7 +19,7 @@ freadf <- function(df){return(as.data.frame(fread(df)))}
 
 # Load datasets ----------------------------------------------------------------
 df_GCST90002409 <- freadf("GCST90002409_buildGRCh38.tsv")
-df_GCST90002409$SNP <- paste("chr", df_GCST90002409$chromosome, ":", df_GCST90002409$base_pair_location, sep="")
+df_GCST90002409$SNP <- paste(df_GCST90002409$chromosome, ":", df_GCST90002409$base_pair_location, sep="")
 
 sQTL <- data.frame()
 for (i in 1:22){
