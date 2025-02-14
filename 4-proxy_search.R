@@ -26,7 +26,7 @@ print(head(df_GCST90002409))
 
 # Preping GWAS for LD Proxy ------------------------------------------------------
 # Adding SNP column
-df_GCST90002409$SNP <- paste("chr", df_GCST90002409$chromosome, ":", df_GCST90002409$base_pair_location, sep="")
+df_GCST90002409$SNP <- paste(df_GCST90002409$chromosome, ":", df_GCST90002409$base_pair_location, sep="")
 
 df_GCST90002409$effect_allele <- toupper(df_GCST90002409$effect_allele)
 df_GCST90002409$other_allele  <- toupper(df_GCST90002409$other_allele)
