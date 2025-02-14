@@ -42,10 +42,9 @@ for (i in 1:22){
   if (!"eaf.outcome" %in% names(GCST2409)) {
   GCST2409$eaf.outcome <- rep(0.5, nrow(GCST2409))
   }
-
+  print(head(sQTL_Artery))
   # Harmonise Data
   harmonised <- harmonise_data(exposure_dat = sQTL_Artery, outcome_dat = GCST2409, action = 2)
-  
   saveRDS(harmonised, sprintf('Har_Chr%s.rds', i))
   
   # Mendelian Randomization
