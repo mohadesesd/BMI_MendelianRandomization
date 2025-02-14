@@ -59,7 +59,7 @@ for (i in 1:22){
   v_id <- colsplit(sQTL_Artery_Reduced$variant_id, "_", c("chromosome", "base_pair_location", "other_allele", "effect_allele", "name"))
   v_id$SNP <- paste(v_id$chromosome, v_id$base_pair_location, sep=":")
   
-  test_merge <- cbind(sQTL_Artery_Reduced[1], sQTL_Artery_Reduced[2], v_id[,c(6,3,4)], sQTL_Artery_Reduced[,2:5])
+  test_merge <- cbind(sQTL_Artery_Reduced[1], sQTL_Artery_Reduced[2], v_id[,c(6,3,4)], sQTL_Artery_Reduced[,3:6])
   
   ## Remove Indel
   test_merge = test_merge[test_merge$other_allele%in%c('A','T','C','G') & test_merge$effect_allele%in%c('A','T','C','G'),]
