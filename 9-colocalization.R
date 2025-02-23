@@ -81,7 +81,6 @@ for (i in 1:length(merged_df$geneName)){
   sQTL_Artery_Reduced$effect_allele <- colsplit(sQTL_Artery_Reduced$variant_id, "_", 
     c("chromosome", "base_pair_location", "other_allele", "effect_allele", "name"))[[4]]
   sQTL_Artery_Reduced$SNP <- paste(sQTL_Artery_Reduced$chromosome, ":", sQTL_Artery_Reduced$base_pair_location, sep="")
-  #print(sQTL_Artery_Reduced)
 
   # Changes the MAF based on the value of ref_factor (either -1 or 1)
   sQTL_Artery_Reduced[sQTL_Artery_Reduced$ref_factor == -1,]$maf <- 1- sQTL_Artery_Reduced[sQTL_Artery_Reduced$ref_factor == -1,]$maf  
@@ -89,10 +88,16 @@ for (i in 1:length(merged_df$geneName)){
   expo_cut <- sQTL_Artery_Reduced[sQTL_Artery_Reduced$base_pair_location <= pos_max & sQTL_Artery_Reduced$base_pair_location >= pos_min, ]
   expo_cut = expo_cut[expo_cut$other_allele%in%c('A','T','C','G') & expo_cut$effect_allele%in%c('A','T','C','G'),]
   expo_cut <- cbind(expo_cut[,c(15,1,11,12,13,14,8,10,9,3,4,5,6)])
+   ## Remove Palindromic Variants
+  #expo_cut <- expo_cut[
+   # !((expo_cut$effect_allele.exposure == "A" & expo_cut$other_allele.exposure == "T") |
+    #  (expo_cut$effect_allele.exposure == "T" & expo_cut$other_allele.exposure == "A") |
+     # (expo_cut$effect_allele.exposure == "C" & expo_cut$other_allele.exposure == "G") |
+     # (expo_cut$effect_allele.exposure == "G" & expo_cut$other_allele.exposure == "C")), ]
 
   ### Renaming columns for harmonize_data() function
   colnames(expo_cut) <- c("SNP", "phenotype_id", "chromosome", "base_pair_location", "other_allele.exposure", "effect_allele.exposure", "tss_distance", "ma_samples", "ma_count", "eaf.exposure", "pval.exposure", "beta.exposure", "se.exposure")
-  print(head(expo_cut))
+  print(expo_cut$se.exposure)
   ### OUTCOME FILE ###
   outc_interest <- readRDS(sprintf('./Pancreas_MR/GCST2409/GCST2409_%s.rds', chrI))
   print(head(outc_interest))
@@ -115,7 +120,7 @@ for (i in 1:length(merged_df$geneName)){
   outc_interest$eaf.outcome <- rep(NA, nrow(outc_interest))
   }
   
-  harm_data <- harmonise_data(expo_cut, outc_interest)
+  harm_data <- harmonise_data(expo_cut, outc_interest, action=2)
   saveRDS(harm_data, sprintf('./Pancreas_MR/Genes/Coloc_Harm_%s_result.rds', prot))
   
   
