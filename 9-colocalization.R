@@ -88,15 +88,16 @@ for (i in 1:length(merged_df$geneName)){
   expo_cut <- sQTL_Artery_Reduced[sQTL_Artery_Reduced$base_pair_location <= pos_max & sQTL_Artery_Reduced$base_pair_location >= pos_min, ]
   expo_cut = expo_cut[expo_cut$other_allele%in%c('A','T','C','G') & expo_cut$effect_allele%in%c('A','T','C','G'),]
   expo_cut <- cbind(expo_cut[,c(15,1,11,12,13,14,8,10,9,3,4,5,6)])
+  colnames(expo_cut) <- c("SNP", "phenotype_id", "chromosome", "base_pair_location", "other_allele.exposure", "effect_allele.exposure", "tss_distance", "ma_samples", "ma_count", "eaf.exposure", "pval.exposure", "beta.exposure", "se.exposure")
+
    ## Remove Palindromic Variants
-  #expo_cut <- expo_cut[
-   # !((expo_cut$effect_allele.exposure == "A" & expo_cut$other_allele.exposure == "T") |
-    #  (expo_cut$effect_allele.exposure == "T" & expo_cut$other_allele.exposure == "A") |
-     # (expo_cut$effect_allele.exposure == "C" & expo_cut$other_allele.exposure == "G") |
-     # (expo_cut$effect_allele.exposure == "G" & expo_cut$other_allele.exposure == "C")), ]
+  expo_cut <- expo_cut[
+   !((expo_cut$effect_allele.exposure == "A" & expo_cut$other_allele.exposure == "T") |
+    (expo_cut$effect_allele.exposure == "T" & expo_cut$other_allele.exposure == "A") |
+    (expo_cut$effect_allele.exposure == "C" & expo_cut$other_allele.exposure == "G") |
+    (expo_cut$effect_allele.exposure == "G" & expo_cut$other_allele.exposure == "C")), ]
 
   ### Renaming columns for harmonize_data() function
-  colnames(expo_cut) <- c("SNP", "phenotype_id", "chromosome", "base_pair_location", "other_allele.exposure", "effect_allele.exposure", "tss_distance", "ma_samples", "ma_count", "eaf.exposure", "pval.exposure", "beta.exposure", "se.exposure")
   print(expo_cut$se.exposure)
   ### OUTCOME FILE ###
   outc_interest <- readRDS(sprintf('./Pancreas_MR/GCST2409/GCST2409_%s.rds', chrI))
