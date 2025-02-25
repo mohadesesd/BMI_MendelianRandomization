@@ -48,18 +48,23 @@ exposure <- read.delim("/lustre03/project/6050805/SHARED_FULL/SHARED/GTEx/sQTL_G
 # Taking the gene TH to start (eventually will loop through all of them)
 for (i in 1:length(merged_df$geneName)){
   # Gene to coloc analyze information
+  print(i)
   ensembleID <- sub(".*:(ENSG[0-9]+)\\..*", "\\1", merged_df$id.exposure)[i]
   print(ensembleID)
   prot <- merged_df$geneName[i]
   print(prot)
   entry <- merged_df[grep(ensembleID, merged_df$phenotype_id),]
-  chrI <- colsplit(entry$variant_id.y, "_", c("chromosome", "base_pair_location", "other_allele", "effect_allele", "name"))[1][i]
-  position <-colsplit(entry$variant_id.y, "_", c("chromosome", "base_pair_location", "other_allele", "effect_allele", "name"))[2][i]
-  SNPI <- paste(chrI, ":", position[1,1], sep="")
+  split_data <- colsplit(entry$variant_id.y, "_", 
+                       c("chromosome", "base_pair_location", "other_allele", "effect_allele", "name"))
+  print(entry)
+  chrI <- split_data[1, "chromosome"]
+  position <- split_data[1, "base_pair_location"]
+  print(position)
+  SNPI <- paste(chrI, ":", position, sep="")
   print(SNPI)
   # 1000000 Mb windows
-  pos_min <- position[1,1] - 500000
-  pos_max <- position[1,1] + 500000
+  pos_min <- position - 500000
+  pos_max <- position + 500000
   
   ### EXPO FILE ###
 
@@ -97,19 +102,23 @@ for (i in 1:length(merged_df$geneName)){
     (expo_cut$effect_allele.exposure == "C" & expo_cut$other_allele.exposure == "G") |
     (expo_cut$effect_allele.exposure == "G" & expo_cut$other_allele.exposure == "C")), ]
 
-
   #expo_cut$se.exposure <- as.numeric(as.character(expo_cut$se.exposure)) 
   #print(str(expo_cut)) 
   ### OUTCOME FILE ###
   outc_interest <- readRDS(sprintf('./Pancreas_MR/GCST2409/GCST2409_%s.rds', chrI))
-  print(head(outc_interest))
-  proxied <- readRDS('./Pancreas_MR/outcomeToMerge.rds')
-  outc_interest <- rbind(outc_interest, proxied %>% filter(sprintf("%s", chrI) == proxied$chromosome))
-  print(head(outc_interest))
-  
+  #proxied <- readRDS('./Pancreas_MR/outcomeToMerge.rds')
+  #proxied <- select(proxied, -SNP_Original)
+  #print(colnames(outc_interest))
+  #print(ncol(outc_interest))
+
+  # For the filtered proxied data frame
+  #filtered_proxied <- proxied %>% filter(chrI == chromosome)
+  #print(colnames(filtered_proxied))
+  #print(ncol(filtered_proxied))
+  #outc_interest <- rbind(outc_interest, proxied %>% filter(sprintf("%s", chrI) == proxied$chromosome))
   
   # Remove Indel
-  outc_interest=outc_interest[outc_interest$other_allele%in%c('A','T','C','G') & outc_interest$effect_allele%in%c('A','T','C','G'),]
+  #outc_interest=outc_interest[outc_interest$other_allele%in%c('A','T','C','G') & outc_interest$effect_allele%in%c('A','T','C','G'),]
   
   # Allele mineur rare (to remove some of the duplicates in the outcome)
   #outc_interest <- outc_interest[outc_interest$effect_allele_frequency > 0.01,]
@@ -118,11 +127,9 @@ for (i in 1:length(merged_df$geneName)){
   expo_cut$id.exposure <- expo_cut$phenotype_id
   expo_cut$exposure <- expo_cut$phenotype_id
   expo_cut <- expo_cut[sub(".*:(ENSG[0-9]+)\\..*", "\\1", expo_cut$id.exposure) == ensembleID,]
-  print(head(expo_cut))
     if (!"eaf.outcome" %in% names(outc_interest)) {
   outc_interest$eaf.outcome <- rep(NA, nrow(outc_interest))
   }
-  print(sum(is.na(expo_cut$se.exposure)))
   harm_data <- harmonise_data(expo_cut, outc_interest, action=2)
   saveRDS(harm_data, sprintf('./Pancreas_MR/Genes/Coloc_Harm_%s_result.rds', prot))
   
@@ -131,9 +138,8 @@ for (i in 1:length(merged_df$geneName)){
   test <- duplicated(harm_data$SNP)
   SNP_toRemove <- harm_data[test,"SNP"]
   harm_data <- harm_data[!(harm_data$SNP %in% SNP_toRemove),]
-  
   # Rearrange data
-  tmp <- harm_data[, c(1, 29, 16, 17, 6, 28, 27, 25, 8, 7, 18, 15)]
+  tmp <- harm_data[, c(1, 28, 21, 22, 6, 26, 25, 23, 8, 7, 16, 15)]
   
   colnames(tmp) <- c("SNP", "gene_id", "chr", "position", "expo_eff", "expo_se", "expo_pv", "expo_N", "expo_maf",  
                      "outc_eff", "outc_se", "outc_pv")
