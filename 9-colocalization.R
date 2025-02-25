@@ -97,7 +97,9 @@ for (i in 1:length(merged_df$geneName)){
     (expo_cut$effect_allele.exposure == "C" & expo_cut$other_allele.exposure == "G") |
     (expo_cut$effect_allele.exposure == "G" & expo_cut$other_allele.exposure == "C")), ]
 
-  print(expo_cut$se.exposure)
+
+  #expo_cut$se.exposure <- as.numeric(as.character(expo_cut$se.exposure)) 
+  #print(str(expo_cut)) 
   ### OUTCOME FILE ###
   outc_interest <- readRDS(sprintf('./Pancreas_MR/GCST2409/GCST2409_%s.rds', chrI))
   print(head(outc_interest))
@@ -113,13 +115,14 @@ for (i in 1:length(merged_df$geneName)){
   #outc_interest <- outc_interest[outc_interest$effect_allele_frequency > 0.01,]
   
   # merge the 2 GWAS using harmonise_data() function 
-  #expo_cut_Renamed <- expo_cut[expo_cut$gene_id == ensembleID,]
   expo_cut$id.exposure <- expo_cut$phenotype_id
   expo_cut$exposure <- expo_cut$phenotype_id
+  expo_cut <- expo_cut[sub(".*:(ENSG[0-9]+)\\..*", "\\1", expo_cut$id.exposure) == ensembleID,]
+  print(head(expo_cut))
     if (!"eaf.outcome" %in% names(outc_interest)) {
   outc_interest$eaf.outcome <- rep(NA, nrow(outc_interest))
   }
-  
+  print(sum(is.na(expo_cut$se.exposure)))
   harm_data <- harmonise_data(expo_cut, outc_interest, action=2)
   saveRDS(harm_data, sprintf('./Pancreas_MR/Genes/Coloc_Harm_%s_result.rds', prot))
   
