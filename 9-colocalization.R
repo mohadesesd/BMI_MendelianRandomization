@@ -97,7 +97,6 @@ for (i in 1:length(merged_df$geneName)){
     (expo_cut$effect_allele.exposure == "C" & expo_cut$other_allele.exposure == "G") |
     (expo_cut$effect_allele.exposure == "G" & expo_cut$other_allele.exposure == "C")), ]
 
-  ### Renaming columns for harmonize_data() function
   print(expo_cut$se.exposure)
   ### OUTCOME FILE ###
   outc_interest <- readRDS(sprintf('./Pancreas_MR/GCST2409/GCST2409_%s.rds', chrI))
