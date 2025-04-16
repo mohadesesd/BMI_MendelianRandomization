@@ -47,7 +47,7 @@ print(splice_iv$SNP)
 # 3. Load and Process the LD Matrix
 # -------------------------------
 # Read LD matrix from file.
-ld_matrix <- read.table("LD_matrix_result.tsv",
+ld_matrix <- read.table("LDMatrix_result.tsv",
                         header = TRUE,
                         sep = "\t",
                         row.names = 1,
@@ -91,11 +91,15 @@ ld_splice <- ld_matrix[common_splice, common_splice, drop = FALSE]
 # -------------------------------
 # 5. LD-Based Pruning Function
 # -------------------------------
-ld_prune <- function(iv_dt, ld_mat, threshold = 0.9) {
+ld_prune <- function(iv_dt, ld_mat, threshold = 0.95) {
   snp_ids <- iv_dt$SNP
   n <- length(snp_ids)
   keep <- rep(TRUE, n)
   names(keep) <- snp_ids
+  
+  # Handle NA values in LD matrix: replace NA with 0 (no correlation)
+  ld_mat[is.na(ld_mat)] <- 0
+  
   for(i in 1:(n - 1)){
     if(!keep[i]) next  # Skip if SNP i already pruned
     for(j in (i + 1):n){
@@ -122,7 +126,7 @@ ld_prune <- function(iv_dt, ld_mat, threshold = 0.9) {
 # -------------------------------
 # 6. Prune Instruments Separately for Expression and Splicing
 # -------------------------------
-ld_threshold <- 0.9
+ld_threshold <- 0.95
 
 final_expr_snps <- ld_prune(expr_iv_final, ld_expr, threshold = ld_threshold)
 cat("Final retained eQTL (Expression) SNPs:\n")
@@ -138,14 +142,6 @@ print(final_splice_snps)
 fwrite(expr_iv_final[SNP %in% final_expr_snps], file = "Final_IVs_expr.tsv", sep = "\t")
 fwrite(splice_iv_final[SNP %in% final_splice_snps], file = "Final_IVs_splice.tsv", sep = "\t")
 cat("Final IV data saved as 'Final_IVs_expr.tsv' and 'Final_IVs_splice.tsv'.\n")
-# Load required library
-library(data.table)
-
-# Read the final IVs list (assuming it contains a column named "SNP")
-#final_iv <- fread("Final_IVs.tsv")
-# Make sure the SNP identifiers are stored in a vector
-#final_SNPs <- final_iv$SNP
-#cat("Number of final IV SNPs:", length(final_SNPs), "\n")
 
 # ----------------------------
 # Subset the eQTL data
