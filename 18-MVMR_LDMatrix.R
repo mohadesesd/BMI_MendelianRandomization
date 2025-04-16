@@ -44,4 +44,4 @@ ld_matrix_result <- LDmatrix(
 write.table(ld_matrix_result, file = "LD_matrix_result.tsv", 
             sep = "\t", quote = FALSE, row.names = TRUE, col.names = NA)
 
-cat("LD matrix saved as 'LD_matrix_result.tsv'\n")
+cat("LD matrix saved as 'LDMatrix_result.tsv'\n")
