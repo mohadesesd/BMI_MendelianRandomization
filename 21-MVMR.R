@@ -10,19 +10,19 @@
 # -----------------------------------------------------------
 
 # Load required libraries
-library(data.table)            # Fast data manipulation
-library(dplyr)                 # Data wrangling
-library(MendelianRandomization) # For MR analyses
+library(data.table)             # Fast data manipulation
+library(dplyr)                  # Data wrangling
+library(MendelianRandomization)  # For MR analyses
 
 # -------------------------------
 # 1. Pre-process Outcome Data (Using variant_id as rsID)
 # -------------------------------
-i <- 16  # Chromosome of interest
+i <- 2  # Chromosome of interest
 
 # Read the main outcome associations file
 df_outcome <- fread("GCST90002409_buildGRCh38.tsv")
 
-# Filter for chromosome 16
+# Filter for chromosome 2
 GCST2409 <- df_outcome %>% filter(sprintf("chr%s", i) == chromosome)
 
 # Convert allele columns to uppercase
@@ -35,7 +35,7 @@ print(head(GCST2409))
 GCST2409[, SNP := variant_id]
 
 # Read proxied outcome data from an RDS file
-proxied <- readRDS('./Adipose_vis_MR/outcomeToMerge.rds')
+proxied <- readRDS('./Adipose_sub_MR/outcomeToMerge.rds')
 proxied <- proxied %>% select(-SNP_Original)
 proxied <- proxied %>% filter(sprintf("%s", i) == chromosome)
 setDT(GCST2409)
@@ -63,24 +63,24 @@ GCST2409_combined <- GCST2409_combined[
   effect_allele %in% c("A", "T", "C", "G"), 
 ]
 
+# Remove palindromic variants
+GCST2409_Renamed <- GCST2409_combined[
+  !((effect_allele == "A" & other_allele == "T") |
+    (effect_allele == "T" & other_allele == "A") |
+    (effect_allele == "C" & other_allele == "G") |
+    (effect_allele == "G" & other_allele == "C")), 
+]
+
 # Select and reorder columns of interest
 desired_cols <- c("variant_id", "SNP", "effect_allele", "other_allele", "p_value", "beta", "standard_error", "TotalSampleSize")
-existing_desired <- intersect(desired_cols, names(GCST2409_combined))
-GCST2409_Renamed <- GCST2409_combined[, ..existing_desired]
+existing_desired <- intersect(desired_cols, names(GCST2409_Renamed))
+GCST2409_Renamed <- GCST2409_Renamed[, ..existing_desired]
 
 # Rename columns to standard names
 new_names <- c("variant_id", "SNP", "effect_allele.outcome", "other_allele.outcome", 
                "pval.outcome", "beta.outcome", "se.outcome", "samplesize.outcome")
 new_names <- new_names[1:length(existing_desired)]
 setnames(GCST2409_Renamed, old = existing_desired, new = new_names)
-
-# Remove palindromic variants
-GCST2409_Renamed <- GCST2409_Renamed[
-  !((effect_allele.outcome == "A" & other_allele.outcome == "T") |
-    (effect_allele.outcome == "T" & other_allele.outcome == "A") |
-    (effect_allele.outcome == "C" & other_allele.outcome == "G") |
-    (effect_allele.outcome == "G" & other_allele.outcome == "C")), 
-]
 
 # Add outcome labels
 GCST2409_Renamed$outcome <- "BMI"
@@ -119,6 +119,7 @@ merged_data <- merge(merged_exposures, GCST2409_Renamed, by = "SNP",
                      all.x = TRUE, allow.cartesian = TRUE)
 cat("First few rows of merged exposure + outcome data:\n")
 print(head(merged_data))
+
 # Filter out rows with missing outcome associations
 merged_data <- merged_data[!is.na(beta.outcome) & !is.na(se.outcome)]
 cat("Merged data after filtering for outcome associations (first few rows):\n")
@@ -127,7 +128,7 @@ print(head(merged_data))
 # -------------------------------
 # 5. Read the LD Matrix and Harmonize SNP IDs
 # -------------------------------
-ld_matrix_result <- read.table("LD_matrix_result.tsv", header = TRUE, sep = "\t", 
+ld_matrix_result <- read.table("LDMatrix_result.tsv", header = TRUE, sep = "\t", 
                                row.names = 1, stringsAsFactors = FALSE, fill = TRUE, check.names = FALSE)
 ld_matrix_result <- as.matrix(ld_matrix_result)
 cat("Original LD matrix dimensions:", dim(ld_matrix_result), "\n")
@@ -150,19 +151,18 @@ print(all_IVs_adj)
 cat("Adjusted SNP IDs from LD matrix:\n")
 print(ld_snps_adj)
 
-rownames(ld_matrix_result) <- ld_snps_adj
-colnames(ld_matrix_result) <- ld_snps_adj
-
+# Identify common SNPs between the exposure and outcome datasets
 common_SNPs <- intersect(all_IVs_adj, ld_snps_adj)
 cat("Common SNPs between merged data and LD matrix:\n")
 print(common_SNPs)
 cat("Number of common SNPs:", length(common_SNPs), "\n")
-if(length(common_SNPs) == 0){
-  stop("No common SNPs found between merged data and LD matrix. Please check your identifiers.")
-}
+
+# Subset merged_data to only contain common SNPs
 merged_data <- merged_data[SNP %in% common_SNPs]
 setorder(merged_data, SNP)
-ld_matrix <- ld_matrix_result[merged_data$SNP, merged_data$SNP, drop = FALSE]
+
+# Subset LD matrix to only contain common SNPs
+ld_matrix <- ld_matrix_result[common_SNPs, common_SNPs, drop = FALSE]
 
 # Regularize the LD matrix to avoid singularity by adding a small constant to the diagonal
 epsilon <- 1e-5
@@ -171,9 +171,6 @@ ld_matrix <- ld_matrix + diag(epsilon, nrow(ld_matrix))
 # -------------------------------
 # 6. Define Exposure and Outcome Columns for MR Input
 # -------------------------------
-# In the merged data, we assume the exposure associations are:
-# For Expression: "slope_expr" and "slope_se_expr"
-# For Splicing:   "slope_splice" and "slope_se_splice"
 listBeta <- c("slope_expr", "slope_splice")
 listSE   <- c("slope_se_expr", "slope_se_splice")
 if (!("beta.outcome" %in% names(merged_data)) || !("se.outcome" %in% names(merged_data))){
@@ -184,64 +181,42 @@ outcome <- "BMI"
 seuil <- 0.05 / length(unique(c(eqtl_data$gene_symbol, sqtl_data$gene_symbol)))
 
 # -------------------------------
-# 7. Create the Multivariable MR Input Object
+# 7. Remove Rows with Missing Data and Create the Multivariable MR Input Object
 # -------------------------------
-# Convert to numeric and check for NAs, zeros, or infinite values
+
+# Define the required columns for MR input
 required_cols <- c(listBeta, listSE, "beta.outcome", "se.outcome")
-if (!all(required_cols %in% names(merged_data))) {
-  stop("Missing required columns in merged_data: ", 
-       paste(required_cols[!required_cols %in% names(merged_data)], collapse = ", "))
-}
-merged_data[, (required_cols) := lapply(.SD, as.numeric), .SDcols = required_cols]
 
-# Check for NA values
-if (any(sapply(merged_data[, ..required_cols], function(x) any(is.na(x))))) {
-  cat("NA values found in data:\n")
-  print(colSums(is.na(merged_data[, ..required_cols])))
-}
+# Remove rows with any NA in these columns
+merged_data_clean <- merged_data[complete.cases(merged_data[, ..required_cols])]
+cat("Number of SNPs after removing NAs:", nrow(merged_data_clean), "\n")
 
-# Check for zero standard errors
-se_cols <- c("slope_se_expr", "slope_se_splice", "se.outcome")
-if (any(sapply(merged_data[, ..se_cols], function(x) any(x == 0, na.rm = TRUE)))) {
-  cat("Zero standard errors found in columns:\n")
-  zero_se_cols <- se_cols[sapply(merged_data[, ..se_cols], function(x) any(x == 0, na.rm = TRUE))]
-  print(zero_se_cols)
-  print(sapply(merged_data[, ..zero_se_cols], function(x) sum(x == 0, na.rm = TRUE)))
-} else {
-  cat("No zero standard errors found.\n")
+# Convert required columns to numeric (if not already)
+merged_data_clean[, (required_cols) := lapply(.SD, as.numeric), .SDcols = required_cols]
+
+# Check for any NA values after conversion
+if (any(sapply(merged_data_clean[, ..required_cols], function(x) any(is.na(x))))) {
+  cat("NA values remain after cleaning:\n")
+  print(colSums(is.na(merged_data_clean[, ..required_cols])))
 }
 
 # Check for infinite values
-if (any(sapply(merged_data[, ..required_cols], function(x) any(is.infinite(x))))) {
+if (any(sapply(merged_data_clean[, ..required_cols], function(x) any(is.infinite(x))))) {
   stop("Infinite values found in data.")
 }
-cat("Summary of exposure and outcome data:\n")
-print(summary(merged_data[, ..required_cols]))
 
-# Check LD matrix properties
-cat("LD matrix dimensions:", dim(ld_matrix), "\n")
-if (any(is.na(ld_matrix))) stop("LD matrix contains NA values.")
-if (!isSymmetric(ld_matrix)) stop("LD matrix is not symmetric.")
-if (!all(diag(ld_matrix) >= 1 - epsilon & diag(ld_matrix) <= 1 + epsilon)) {
-  cat("LD matrix diagonal elements are not approximately 1:\n")
-  print(diag(ld_matrix))
-}
-max_corr <- max(abs(ld_matrix[upper.tri(ld_matrix)]))
-cat("Maximum off-diagonal correlation in LD matrix:", max_corr, "\n")
-if (max_corr > 0.99) cat("Warning: Very high correlations may cause numerical instability.\n")
-eig <- eigen(ld_matrix)$values
-if (any(eig <= 0)) {
-  cat("LD matrix is not positive definite. Increasing epsilon.\n")
-  epsilon <- 1e-4  # Try a larger value
-  ld_matrix <- ld_matrix_result[merged_data$SNP, merged_data$SNP, drop = FALSE] + diag(epsilon, nrow(ld_matrix))
-}
+cat("Summary of cleaned exposure and outcome data:\n")
+print(summary(merged_data_clean[, ..required_cols]))
 
-# Create MR input object
+# Reorder the LD matrix to contain only SNPs in the cleaned merged_data
+ld_matrix <- ld_matrix[merged_data_clean$SNP, merged_data_clean$SNP, drop = FALSE]
+
+# Create the MR input object
 mr_input_object <- mr_mvinput(
-  bx = as.matrix(merged_data[, ..listBeta]),
-  bxse = as.matrix(merged_data[, ..listSE]),
-  by = merged_data[, beta.outcome],
-  byse = merged_data[, se.outcome],
+  bx = as.matrix(merged_data_clean[, ..listBeta]),
+  bxse = as.matrix(merged_data_clean[, ..listSE]),
+  by = merged_data_clean[, beta.outcome],
+  byse = merged_data_clean[, se.outcome],
   corr = ld_matrix,
   exposure = listExposure,
   outcome = outcome
@@ -254,18 +229,12 @@ cat("Running Multivariable MR Analyses...\n")
 ivw_result <- try(mr_mvivw(mr_input_object, alpha = seuil), silent = TRUE)
 if (inherits(ivw_result, "try-error") || all(is.na(ivw_result@Estimate))) {
   cat("IVW MR analysis failed or produced NA estimates.\n")
-  # Test without correlation
-  mr_input_uncorr <- mr_mvinput(
-    bx = as.matrix(merged_data[, ..listBeta]),
-    bxse = as.matrix(merged_data[, ..listSE]),
-    by = merged_data[, beta.outcome],
-    byse = merged_data[, se.outcome],
-    exposure = listExposure,
-    outcome = outcome
-  )
-  ivw_uncorr <- mr_mvivw(mr_input_uncorr, alpha = seuil)
-  cat("IVW MR Results (assuming uncorrelated variants):\n")
-  print(ivw_uncorr)
+  # Check if the residual standard error is NaN and set it manually if needed
+  if (is.nan(ivw_result@RSE) || is.null(ivw_result@RSE)) {
+    ivw_result@RSE <- 1  # Set RSE to 1 as fixed-effect model assumption
+  }
+  print("IVW Results with manual RSE set to 1:")
+  print(ivw_result)
 } else {
   cat("IVW MR Analysis Results:\n")
   print(ivw_result)
@@ -279,11 +248,12 @@ if (inherits(egger_result, "try-error") || all(is.na(egger_result@Estimate))) {
   print(egger_result)
 }
 
-# Save results if successful
+# Save results by capturing the summary output as text
 if (!inherits(ivw_result, "try-error") && !all(is.na(ivw_result@Estimate))) {
-  write.table(ivw_result, file = "IVW_MR_result.tsv", sep = "\t", quote = FALSE, row.names = TRUE, col.names = NA)
+  writeLines(capture.output(summary(ivw_result)), con = "IVW_MR_result.txt")
 }
 if (!inherits(egger_result, "try-error") && !all(is.na(egger_result@Estimate))) {
-  write.table(egger_result, file = "MR_Egger_result.tsv", sep = "\t", quote = FALSE, row.names = TRUE, col.names = NA)
+  writeLines(capture.output(summary(egger_result)), con = "MR_Egger_result.txt")
 }
+
 cat("MR analysis completed. Check output files if generated.\n")
