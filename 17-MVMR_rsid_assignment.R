@@ -1,15 +1,16 @@
 # -----------------------------------------------------------
 # Load Required Libraries
 # -----------------------------------------------------------
-library(data.table)  # For fast data manipulation
-library(biomaRt)     # For querying Ensembl SNP data
+library(curl)         # For making HTTP requests
+library(data.table)   # For fast data manipulation
+library(jsonlite)     # For parsing JSON responses
 
 # -----------------------------------------------------------
 # 1. Read the sQTL and eQTL TSV Files
 # -----------------------------------------------------------
 # Update the file paths accordingly
-sqtls <- fread("Filtered_sQTLs_KNOP1.tsv")
-eqtls <- fread("Filtered_eQTLs_KNOP1.tsv")
+sqtls <- fread("Filtered_sQTLs_FKBP11.tsv")
+eqtls <- fread("Filtered_eQTLs_FKBP11.tsv")
 
 # -----------------------------------------------------------
 # 2. Create a "variant" Column as "chr:pos"
@@ -28,20 +29,60 @@ variant_dt[, c("chr", "pos") := tstrsplit(variant, ":", fixed = TRUE)]
 variant_dt[, pos := as.numeric(pos)]
 # For the Ensembl query, remove the "chr" prefix.
 variant_dt[, chr := sub("^chr", "", chr)]
-# variant_dt now contains: variant, chr (as character), and pos.
 
 # -----------------------------------------------------------
-# 4. Query Ensembl (via biomaRt) to Retrieve rsIDs Using a ±100 bp Window
+# 4. Query Ensembl API (Overlap Endpoint) Using curl to Retrieve SNP IDs (rsIDs)
 # -----------------------------------------------------------
-# Connect to the Ensembl SNP mart.
-mart <- useMart("ENSEMBL_MART_SNP",
-                dataset = "hsapiens_snp",
-                host = "https://www.ensembl.org")
+query_ensembl_curl <- function(chromosome, pos_vec, window = 100, retries = 3, wait_time = 5) {
+  # Use the overlap endpoint which returns all features overlapping the region.
+  ensembl_url <- "https://rest.ensembl.org/overlap/region/human/"
+  
+  # Prepare the query string.
+  query <- paste0(chromosome, ":", min(pos_vec) - window, "-", max(pos_vec) + window, "?feature=variation")
+  
+  # Debug: Print the URL to check if it's correct.
+  full_url <- paste0(ensembl_url, query)
+  message("Querying URL: ", full_url)
+  
+  # Prepare the curl handle with headers.
+  h <- new_handle(timeout = 300)
+  handle_setheaders(h,
+                    "Content-Type" = "application/json",
+                    "Accept" = "application/json")
+  
+  # Retry mechanism.
+  attempt <- 1
+  while (attempt <= retries) {
+    res <- tryCatch({
+      # Fetch the URL using curl.
+      r <- curl_fetch_memory(full_url, handle = h)
+      raw_response <- rawToChar(r$content)
+      
+      # Check if response is HTML (error page)
+      if (grepl("<html>", raw_response, ignore.case = TRUE)) {
+        stop("Received an HTML error page. Possibly incorrect request.")
+      }
+      
+      # Parse JSON response.
+      snp_data <- fromJSON(raw_response)
+      return(snp_data)
+    }, error = function(e) {
+      message("Error querying for chromosome ", chromosome, ": ", e)
+      return(NULL)
+    })
+    
+    if (!is.null(res) && length(res) > 0) {
+      return(res)
+    }
+    
+    message(paste("Query failed. Retrying... (Attempt", attempt, "of", retries, ")"))
+    Sys.sleep(wait_time)
+    attempt <- attempt + 1
+  }
+  return(NULL)
+}
 
-# Set the query window (in base pairs)
-window <- 100
-
-# Prepare an empty list to store results for each chromosome
+# Prepare an empty list to store results for each chromosome.
 snp_list <- list()
 
 # Loop over each unique chromosome in variant_dt:
@@ -49,26 +90,20 @@ for (ch in unique(variant_dt$chr)) {
   dt_ch <- variant_dt[chr == ch]
   pos_vec <- dt_ch$pos
   
-  # Query Ensembl using filters "chr_name", "start", and "end"
-  # and attributes: "refsnp_id", "chr_name", and "chrom_start".
-  res <- tryCatch({
-    getBM(
-      attributes = c("refsnp_id", "chr_name", "chrom_start"),
-      filters    = c("chr_name", "start", "end"),
-      values     = list(
-        chr_name = ch,
-        start    = pos_vec - window,
-        end      = pos_vec + window
-      ),
-      mart       = mart
-    )
-  }, error = function(e) {
-    message("Error querying for chromosome ", ch, ": ", e)
-    NULL
-  })
+  # Query Ensembl with retries.
+  res <- query_ensembl_curl(ch, pos_vec)
   
-  if (!is.null(res) && nrow(res) > 0) {
-    snp_list[[ch]] <- as.data.table(res)
+  if (!is.null(res) && length(res) > 0) {
+    # 'res' should be a JSON array of objects.
+    # We expect each object to have: "id" (rsID), "seq_region_name", and "start".
+    # Create a data.table with:
+    #   - variant: constructed as "seq_region_name_start"
+    #   - SNP: the id field (which is typically something like "rsXXXXX")
+    snp_dt <- data.table(
+      variant = paste0(res$seq_region_name, "_", res$start),
+      SNP = res$id
+    )
+    snp_list[[ch]] <- snp_dt
   } else {
     message("No mapping returned for chromosome ", ch)
   }
@@ -84,23 +119,25 @@ if (length(snp_list) == 0) {
   snp_mapping <- rbindlist(snp_list, fill = TRUE)
 }
 
-# Before merging, ensure that the join columns are the same type.
-# Convert snp_mapping$chr_name to character (it might be integer).
-snp_mapping[, chr_name := as.character(chr_name)]
+# For the merge, we need to have join columns.
+# In our constructed snp_dt, the column 'variant' is created as "seq_region_name_start".
+# For clarity, we add two columns: 'chr_name' and 'pos' extracted from that.
+if (nrow(snp_mapping) > 0) {
+  snp_mapping[, chr_name := as.character(sapply(variant, function(x) strsplit(x, "_")[[1]][1]))]
+  snp_mapping[, pos := as.numeric(sapply(variant, function(x) strsplit(x, "_")[[1]][2]))]
+}
 
-# Rename the attribute "chrom_start" to "pos", if present.
-setnames(snp_mapping, "chrom_start", "pos", skip_absent = TRUE)
+message("Columns in snp_mapping: ", paste(names(snp_mapping), collapse = ", "))
 
 # -----------------------------------------------------------
-# 5. Merge the SNP Mapping with the Unique Variant Table
+# 5. Merge the SNP Mapping with the Unique Variant Table Using .EACHI for Group-wise Join
 # -----------------------------------------------------------
-# Merge variant_dt (with columns "chr", "pos", "variant") with snp_mapping (with "chr_name" and "pos")
-variant_dt <- merge(variant_dt, snp_mapping, by.x = c("chr", "pos"),
-                    by.y = c("chr_name", "pos"), all.x = TRUE)
-
-# Rename the column "refsnp_id" to "SNP".
-setnames(variant_dt, "refsnp_id", "SNP", skip_absent = TRUE)
-# variant_dt now has columns: chr, pos, variant, and SNP.
+variant_dt <- variant_dt[
+  snp_mapping, 
+  on = .(chr = chr_name, pos = pos), 
+  .(variant, SNP = SNP), 
+  by = .EACHI
+]
 
 # -----------------------------------------------------------
 # 6. Merge the rsID Information Back into the sQTL and eQTL Data
@@ -109,7 +146,7 @@ sqtls <- merge(sqtls, variant_dt[, .(variant, SNP)], by = "variant", all.x = TRU
 eqtls <- merge(eqtls, variant_dt[, .(variant, SNP)], by = "variant", all.x = TRUE)
 
 # -----------------------------------------------------------
-# 7.  Save the Updated Tables as TSV Files
+# 7. Save the Updated Tables as TSV Files
 # -----------------------------------------------------------
 fwrite(sqtls, file = "sQTL_with_SNP.tsv", sep = "\t")
 fwrite(eqtls, file = "eQTL_with_SNP.tsv", sep = "\t")
